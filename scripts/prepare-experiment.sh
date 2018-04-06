@@ -4,6 +4,8 @@
 # or to just run lenticular lenses:
 # ./scripts/prepare-experiment.sh test 8081
 
+cd -P -- "$(dirname -- "$0")" #go to dir of script even if it was called as a symbolic link
+cd ..
 
 set -o nounset
 set -o errexit
