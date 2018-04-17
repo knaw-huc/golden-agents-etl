@@ -10,7 +10,7 @@
     The variable <<skip>> can be settled to allow you to see a counter while the file is running
     It means the counter will be updated for each <<skip>> records
 
-cat "Notarieel_Export_20180321.xml" | python -m xmltodict 2 | python -u xml2ttl001source.py
+cat "SAA-ID-001_Notarieel_Boedelinventarissen.xml" | python -m xmltodict 2 | python -u xml2rdf.py
 
 """
 
@@ -26,7 +26,7 @@ from kitchen.text.converters import to_bytes, to_unicode
 ###########################################################################
 output_file_name = 'SAA-ID-001-Notarieel-Boedelinventarissen'
 out_size = 20000
-skip = 10#00
+skip = 100#0
 limit_files = 30
 
 ###########################################################################
@@ -41,11 +41,42 @@ outcome_start = """
 @prefix saaLocation: <http://goldenagents.org/uva/SAA/location/@@/> .
 @prefix saaOnt: <http://goldenagents.org/uva/SAA/ontology/> .
 ###########################################################################
+
+<http://goldenagents.org/datasets/NotarialActs001> {
 """
 outcome = outcome_start
 list_no_date = []
 list_no_akteType =[]
 
+def processStructure2RDF(elem, main_key):
+    outerpart = "\t\tsaaOnt:{} \t {}:{} ;\n".format(main_key, elem['prefix'], elem['id'])
+
+    innerpart = " {}:{} \t a \t saaOnt:{} ;\n".format(elem['prefix'], elem['id'], elem['a'])
+    subInnerPart = ""
+    try:
+        for key in elem:
+            if key not in ['a', 'id', 'prefix', 'isInRecord'] and elem[key]:
+                if type(elem[key]) != list:
+                    elem[key] = [elem[key]]
+                for innerElem in elem[key]:
+                    if type(innerElem) is not list:
+                        innerElem = [innerElem]
+                    if innerElem != [] and type(innerElem[0]) is dict:
+                        for ie in innerElem:
+                            (subOut, subIn) = processStructure2RDF(ie, key)
+                            innerpart += subOut
+                            subInnerPart += subIn
+                    else:
+                        for ie in innerElem:
+                            innerpart += "\t\tsaaOnt:{}  \t\t \"{}\" ;\n".format(key, to_bytes(ie))
+            elif key == 'isInRecord':
+                innerpart += "\t\tsaaOnt:{}  \t\t {} ;\n".format(key, elem[key])
+    except:
+        print elem
+
+    innerpart = innerpart[:-2] + '.\n\n'
+    innerpart += subInnerPart
+    return (outerpart, innerpart)
 
 ###########################################################################
 # MAIN CODE
@@ -99,16 +130,19 @@ while True:
             return ''
 
         getStructure = lambda text, idRec, pNum : {'a': 'Person',
+                                             'prefix': 'saaPerson',
                                              'id': idRec+pNum,
                                              'full_name': text,
                                              'family_name':getFamily(text)}
 
 
         getStructureNameParts = lambda full_name, idRec, pNum :{'a': 'Person',
+                                             'prefix': 'saaPerson',
                                              'id': idRec+pNum,
                                              'full_name': full_name}
 
         getStructureNamePartsPos = lambda full_name, id :{'a': 'Person',
+                                             'prefix': 'saaPerson',
                                              'id': id,
                                              'full_name': full_name}
 
@@ -249,6 +283,7 @@ while True:
 
 
         getStructureLoc = lambda text, id, n: {'a': 'Location',
+                                             'prefix': 'saaLocation',
                                              'id': id + 'l' + str(n),
                                              'location': text}
 
@@ -308,42 +343,62 @@ while True:
         inner = ''
 
         for master_key in structure:
-            listS = []
-            if type(structure[master_key]) == dict:
-                listS += [structure[master_key]]
-            elif type(structure[master_key]) == list:
-                listS = structure[master_key]
-            for elem in listS:
-
-
-                outcome +=  "\t\tsaaOnt:{} \t\t saaPerson:{} ;\n".format(master_key, elem['id'])
-
-                inner += " saaPerson:{} \t a \t saaOnt:{} ;\n".format(elem['id'], elem['a'])
-                for key in elem:
-                    if key not in ['a','id','isInRecord'] and elem[key]:
-                        text = to_bytes(elem[key])
-                        inner += "\t\tsaaOnt:{}  \t\t \"\"\"{}\"\"\" ;\n".format(key, text)
-                    elif key == 'isInRecord':
-                        inner += "\t\tsaaOnt:{}  \t\t {} ;\n".format(key, elem[key])
-                inner = inner[:-2] + '.\n\n'
-
+            elem = structure[master_key]
+            if type(elem) is dict:
+                elem = [elem]
+            if type(elem) is list and elem != [] and type(elem[0]) is dict:
+                for e in elem:
+                    (outerpart, innerpart) = processStructure2RDF(e, master_key)
+                    outcome += outerpart
+                    inner += innerpart
 
         for master_key in structureLoc:
-            outcome += "\t\tsaaOnt:{} \t saaLocation:{} ;\n".format(master_key, structureLoc[master_key]['id'])
+            elem = structureLoc[master_key]
+            if type(elem) is dict:
+                elem = [elem]
+            if type(elem) is list and elem != [] and type(elem[0]) is dict:
+                for e in elem:
+                    (outerpart, innerpart) = processStructure2RDF(e, master_key)
+                    outcome += outerpart
+                    inner += innerpart
 
-            inner += " saaLocation:{} \t a \t saaOnt:{} ;\n".format(structureLoc[master_key]['id'], 'Location')
-            for key in structureLoc[master_key]:
-                if key not in ['a', 'id', 'isInRecord'] and structureLoc[master_key][key]:
-                    if type(structureLoc[master_key][key]) == list:
-                        for text in structureLoc[master_key][key]:
-                                inner += "\t\tsaaOnt:{}  \t\t \"\"\"{}\"\"\" ;\n".format(key, to_bytes(text))
-                    else:
-                        text = to_bytes(structureLoc[master_key][key])
-                        inner += "\t\tsaaOnt:{}  \t\t \"\"\"{}\"\"\" ;\n".format(key, to_bytes(text))
-                elif key == 'isInRecord':
-                    inner += "\t\tsaaOnt:{}  \t\t {} ;\n".format(key, structureLoc[master_key][key])
-
-            inner = inner[:-2] + '.\n\n'
+        # for master_key in structure:
+        #     listS = []
+        #     if type(structure[master_key]) == dict:
+        #         listS += [structure[master_key]]
+        #     elif type(structure[master_key]) == list:
+        #         listS = structure[master_key]
+        #     for elem in listS:
+        #
+        #
+        #         outcome +=  "\t\tsaaOnt:{} \t\t saaPerson:{} ;\n".format(master_key, elem['id'])
+        #
+        #         inner += " saaPerson:{} \t a \t saaOnt:{} ;\n".format(elem['id'], elem['a'])
+        #         for key in elem:
+        #             if key not in ['a','id','isInRecord'] and elem[key]:
+        #                 text = to_bytes(elem[key])
+        #                 inner += "\t\tsaaOnt:{}  \t\t \"\"\"{}\"\"\" ;\n".format(key, text)
+        #             elif key == 'isInRecord':
+        #                 inner += "\t\tsaaOnt:{}  \t\t {} ;\n".format(key, elem[key])
+        #         inner = inner[:-2] + '.\n\n'
+        #
+        #
+        # for master_key in structureLoc:
+        #     outcome += "\t\tsaaOnt:{} \t saaLocation:{} ;\n".format(master_key, structureLoc[master_key]['id'])
+        #
+        #     inner += " saaLocation:{} \t a \t saaOnt:{} ;\n".format(structureLoc[master_key]['id'], 'Location')
+        #     for key in structureLoc[master_key]:
+        #         if key not in ['a', 'id', 'isInRecord'] and structureLoc[master_key][key]:
+        #             if type(structureLoc[master_key][key]) == list:
+        #                 for text in structureLoc[master_key][key]:
+        #                         inner += "\t\tsaaOnt:{}  \t\t \"\"\"{}\"\"\" ;\n".format(key, to_bytes(text))
+        #             else:
+        #                 text = to_bytes(structureLoc[master_key][key])
+        #                 inner += "\t\tsaaOnt:{}  \t\t \"\"\"{}\"\"\" ;\n".format(key, to_bytes(text))
+        #         elif key == 'isInRecord':
+        #             inner += "\t\tsaaOnt:{}  \t\t {} ;\n".format(key, structureLoc[master_key][key])
+        #
+        #     inner = inner[:-2] + '.\n\n'
 
 
         outcome = outcome[:-2] + '.\n\n' + inner
@@ -357,7 +412,8 @@ while True:
                 # print "Limit of files is reached"
                 # exit(0)
                 raise Exception('Limit of files is reached', 'Limit of files is reached')
-            filename = output_file_name + 'N' + str(count_registers/out_size) + '.ttl'
+            outcome += "\n } "  ## closes the named graph
+            filename = output_file_name + 'N' + str(count_registers/out_size) + '.trig'
             with codecs.open(filename, 'wb', encoding='utf-8') as outfile:
                 outfile.write(to_unicode(outcome))
                 outfile.close()
@@ -371,8 +427,8 @@ while True:
         print 'Final List no date', list_no_date
         print 'Final List no akteType', list_no_akteType
 
-
-        filename = output_file_name + 'N' + str((count_registers-1)//out_size+1) + '.ttl'
+        outcome += "\n } "  ## closes the named graph
+        filename = output_file_name + 'N' + str((count_registers-1)//out_size+1) + '.trig'
         with codecs.open(filename, 'wb', encoding='utf-8') as outfile:
             outfile.write(to_unicode(outcome))
             outfile.close()

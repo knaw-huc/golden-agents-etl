@@ -10,7 +10,7 @@
     The variable <<skip>> can be settled to allow you to see a counter while the file is running
     It means the counter will be updated for each <<skip>> records
 
-    cat "SAA-ID-002-SAA_Index_op_doopregister.xml" | python -m xmltodict 2 | python -u xml2ttl002source.py
+    cat "SAA-ID-002-SAA-Index-op-doopregister.xml" | python -m xmltodict 2 | python -u xml2rdf.py
 
 """
 
@@ -39,9 +39,41 @@ outcome_start = """
 @prefix saaPerson: <http://goldenagents.org/uva/SAA/person/@@/> .
 @prefix saaOnt: <http://goldenagents.org/uva/SAA/ontology/> .
 ###########################################################################
+
+<http://goldenagents.org/datasets/Baptism002> {
 """
 outcome = outcome_start
 list_no_date = []
+
+def processStructure2RDF(elem, main_key):
+    outerpart = "\t\tsaaOnt:{} \t {}:{} ;\n".format(main_key, elem['prefix'], elem['id'])
+
+    innerpart = " {}:{} \t a \t saaOnt:{} ;\n".format(elem['prefix'], elem['id'], elem['a'])
+    subInnerPart = ""
+    try:
+        for key in elem:
+            if key not in ['a', 'id', 'prefix', 'isInRecord'] and elem[key]:
+                if type(elem[key]) != list:
+                    elem[key] = [elem[key]]
+                for innerElem in elem[key]:
+                    if type(innerElem) is not list:
+                        innerElem = [innerElem]
+                    if innerElem != [] and type(innerElem[0]) is dict:
+                        for ie in innerElem:
+                            (subOut, subIn) = processStructure2RDF(ie, key)
+                            innerpart += subOut
+                            subInnerPart += subIn
+                    else:
+                        for ie in innerElem:
+                            innerpart += "\t\tsaaOnt:{}  \t\t \"{}\" ;\n".format(key, to_bytes(ie))
+            elif key == 'isInRecord':
+                innerpart += "\t\tsaaOnt:{}  \t\t {} ;\n".format(key, elem[key])
+    except:
+        print elem
+
+    innerpart = innerpart[:-2] + '.\n\n'
+    innerpart += subInnerPart
+    return (outerpart, innerpart)
 
 ###########################################################################
 # MAIN CODE
@@ -85,22 +117,41 @@ while True:
                 return map(getFamily, s)
             return ''
 
-        getStructure = lambda text, id, n : {'a': 'saaOnt:Person',
+        def getFirst(s):
+            if type(s) in [str, unicode]:
+                if "," in s:
+                    return s[s.index(",")+2:s.index("[")].strip() if "[" in s else s[s.index(",")+2:].strip()
+            elif type(s) == list:
+                return map(getFirst, s)
+            return ''
+
+        def getInfix(s):
+            if type(s) in [str, unicode]:
+                if "[" in s:
+                    return s[s.index("[")+1:s.index("]")] if s.index("[") >= 0 else ''
+            elif type(s) == list:
+                return map(getInfix, s)
+            return ''
+
+        getStructurePerson = lambda text, id, n : {'a': 'Person',
+                                             'prefix': 'saaPerson',
                                              'id': id+'p'+str(n),
                                              'full_name': text,
-                                             'family_name':getFamily(text)}
+                                             'first_name': getFirst(text),
+                                             'infix_name': getInfix(text),
+                                             'family_name': getFamily(text)}
 
         #####################################################################################
         # Assembling an auxiliary dictionary (structure) for the persons described in the record
         #####################################################################################
         structure = {}
         if 'Moeder' in item:
-            structure['hasMother'] = getStructure(item['Moeder'], index_id, count_person)
+            structure['hasMother'] = getStructurePerson(item['Moeder'], index_id, count_person)
             structure['hasMother']['isInRecord'] = 'saaRec:'+index_id
             count_person += 1
 
         if 'Vader' in item:
-            structure['hasFather'] = getStructure(item['Vader'], index_id, count_person)
+            structure['hasFather'] = getStructurePerson(item['Vader'], index_id, count_person)
             structure['hasFather']['isInRecord'] = 'saaRec:'+index_id
             count_person += 1
 
@@ -122,9 +173,9 @@ while True:
                     full_name = surname + child_name[child_name.index(","):].strip() + ' ' + prefix
                 else:
                     full_name = child_name[child_name.index(",")+1:].strip()
-                structure['hasChild'] = getStructure(full_name, index_id, count_person)
+                structure['hasChild'] = getStructurePerson(full_name, index_id, count_person)
             else:
-                structure['hasChild'] = getStructure(child_name, index_id, count_person)
+                structure['hasChild'] = getStructurePerson(child_name, index_id, count_person)
             structure['hasChild']['isInRecord'] = 'saaRec:'+index_id
             count_person += 1
 
@@ -132,12 +183,12 @@ while True:
             if type(item['Getuige']) == list:
                 structure['hasWitness'] = []
                 for text in item['Getuige']:
-                    temp = getStructure(text, index_id, count_person)
+                    temp = getStructurePerson(text, index_id, count_person)
                     temp['isInRecord'] = 'saaRec:'+index_id
                     structure['hasWitness'] += [temp]
                     count_person += 1
             else:
-                structure['hasWitness'] = getStructure(item['Getuige'], index_id, count_person)
+                structure['hasWitness'] = getStructurePerson(item['Getuige'], index_id, count_person)
                 structure['hasWitness']['isInRecord'] = 'saaRec:'+index_id
                 count_person += 1
 
@@ -177,22 +228,32 @@ while True:
 
         inner = ''
         for master_key in structure:
-            listS = []
-            if type(structure[master_key]) == dict:
-                listS += [structure[master_key]]
-            else:
-                listS = structure[master_key]
-            for elem in listS:
-                outcome +=  "\t\tsaaOnt:{} \t\t saaPerson:{} ;\n".format(master_key, elem['id'])
+            elem = structure[master_key]
+            if type(elem) is dict:
+                elem = [elem]
+            if type(elem) is list and elem != [] and type(elem[0]) is dict:
+                for e in elem:
+                    (outerpart, innerpart) = processStructure2RDF(e, master_key)
+                    outcome += outerpart
+                    inner += innerpart
 
-                inner += " saaPerson:{} \t a \t saaOnt:{} ;\n".format(elem['id'], 'Person')
-                for key in elem:
-                    if key not in ['a','id','isInRecord'] and elem[key]:
-                        text = to_bytes(elem[key])
-                        inner += "\t\tsaaOnt:{}  \t\t \"{}\" ;\n".format(key, text)
-                    elif key == 'isInRecord':
-                        inner += "\t\tsaaOnt:{}  \t\t {} ;\n".format(key, elem[key])
-                inner = inner[:-2] + '.\n\n'
+        # for master_key in structure:
+        #     listS = []
+        #     if type(structure[master_key]) == dict:
+        #         listS += [structure[master_key]]
+        #     else:
+        #         listS = structure[master_key]
+        #     for elem in listS:
+        #         outcome +=  "\t\tsaaOnt:{} \t\t saaPerson:{} ;\n".format(master_key, elem['id'])
+        #
+        #         inner += " saaPerson:{} \t a \t saaOnt:{} ;\n".format(elem['id'], 'Person')
+        #         for key in elem:
+        #             if key not in ['a','id','isInRecord'] and elem[key]:
+        #                 text = to_bytes(elem[key])
+        #                 inner += "\t\tsaaOnt:{}  \t\t \"{}\" ;\n".format(key, text)
+        #             elif key == 'isInRecord':
+        #                 inner += "\t\tsaaOnt:{}  \t\t {} ;\n".format(key, elem[key])
+        #         inner = inner[:-2] + '.\n\n'
 
         outcome = outcome[:-2] + '.\n\n' + inner
 
@@ -204,7 +265,8 @@ while True:
             if n_file == limit_files:
 
                 raise Exception('Limit of files is reached', 'Limit of files is reached')
-            filename = output_file_name + 'N' + str(count_registers/out_size) + '.ttl'
+            outcome += "\n } "  ## closes the named graph
+            filename = output_file_name + 'N' + str(count_registers/out_size) + '.trig'
             with codecs.open(filename, 'wb', encoding='utf-8') as outfile:
                 outfile.write(to_unicode(outcome))
                 outfile.close()
@@ -214,8 +276,8 @@ while True:
     except Exception as error:
 
         print 'Final List no date', list_no_date
-
-        filename = output_file_name + 'N' + str((count_registers-1)//out_size+1) + '.ttl'
+        outcome += "\n } "  ## closes the named graph
+        filename = output_file_name + 'N' + str((count_registers-1)//out_size+1) + '.trig'
         with codecs.open(filename, 'wb', encoding='utf-8') as outfile:
             outfile.write(to_unicode(outcome))
             outfile.close()
