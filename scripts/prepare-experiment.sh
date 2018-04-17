@@ -18,7 +18,7 @@ shift
 while (( "$#" )); do
   name=`basename input/rdf/SAA-ID-${1}*`
   echo "Uploading $name to stardog"
-  /opt/stardog/bin/stardog data add http://localhost:8120/${stardog_database_name} -g "http://goldenagents.org/datasets/${name}" input/rdf/${name}/*.ttl
+  /opt/stardog/bin/stardog data add http://localhost:8120/${stardog_database_name} input/rdf/${name}/*.trig
   shift
 done
 
