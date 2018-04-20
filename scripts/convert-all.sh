@@ -8,12 +8,18 @@ cd -P -- "$(dirname -- "$0")" #go to dir of script even if it was called as a sy
 cd ..
 
 for dir in `cd ./input/xml/ && ls`; do
-  echo "converting $dir"
-  rm -fr ./input/rdf/$dir/*
-  zcat ./input/xml/$dir/*.xml.gz | python -m xmltodict 2 | python -u ./scripts/$dir/xml2rdf.py
-  mkdir -p ./input/rdf/$dir
-  mv ./scripts/$dir/*.ttl ./input/rdf/$dir
-  git add -A ./input/rdf/$dir/*
+  if shasum -s -c ./input/xml/$dir/checksums; then
+    echo "files in $dir are up to date"
+  else 
+    echo "converting $dir"
+    mkdir -p ./input/rdf/$dir
+    rm -fr ./input/rdf/$dir/*
+    gzip -c -d ./input/xml/$dir/*.xml.gz | python -m xmltodict 2 | python -u ./scripts/$dir/xml2rdf.py
+    mv ./scripts/$dir/*.ttl ./input/rdf/$dir
+    shasum ./input/xml/$dir/*.xml.gz > input/xml/$dir/checksums
+    git add ./input/xml/$dir/checksums
+    git add -A ./input/rdf/$dir/*
+  fi
 done
 
 git commit -m "Re-executed conversion"
